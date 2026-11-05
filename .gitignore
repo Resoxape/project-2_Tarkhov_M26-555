@@ -2,8 +2,11 @@
 dist/
 __pycache__/
 *.egg-info
+.ruff_cache/
+
+# данные базы
 db_meta.json
-demo.cast
 data/
-crud.cast
-final.cast
+
+# записи asciinema
+*.cast

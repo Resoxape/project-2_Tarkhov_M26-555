@@ -1,13 +1,18 @@
 import json
 import os
 
-DATA_DIR = "data"
+from primitive_db.constants import (
+    DATA_DIR,
+    DATA_FILE_EXTENSION,
+    FILE_ENCODING,
+    JSON_INDENT,
+)
 
 
 def load_metadata(filepath):
     """Загружает метаданные из JSON-файла. Если файла нет, возвращает {}."""
     try:
-        with open(filepath, encoding="utf-8") as file:
+        with open(filepath, encoding=FILE_ENCODING) as file:
             return json.load(file)
     except FileNotFoundError:
         return {}
@@ -18,19 +23,19 @@ def load_metadata(filepath):
 
 def save_metadata(filepath, data):
     """Сохраняет метаданные в JSON-файл."""
-    with open(filepath, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=4)
+    with open(filepath, "w", encoding=FILE_ENCODING) as file:
+        json.dump(data, file, ensure_ascii=False, indent=JSON_INDENT)
 
 
 def table_path(table_name):
     """Путь к файлу с данными таблицы: data/<имя_таблицы>.json."""
-    return os.path.join(DATA_DIR, f"{table_name}.json")
+    return os.path.join(DATA_DIR, f"{table_name}{DATA_FILE_EXTENSION}")
 
 
 def load_table_data(table_name):
     """Загружает записи таблицы. Если файла нет, возвращает []."""
     try:
-        with open(table_path(table_name), encoding="utf-8") as file:
+        with open(table_path(table_name), encoding=FILE_ENCODING) as file:
             return json.load(file)
     except FileNotFoundError:
         return []
@@ -42,8 +47,8 @@ def load_table_data(table_name):
 def save_table_data(table_name, data):
     """Сохраняет записи таблицы в data/<имя_таблицы>.json."""
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(table_path(table_name), "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=4)
+    with open(table_path(table_name), "w", encoding=FILE_ENCODING) as file:
+        json.dump(data, file, ensure_ascii=False, indent=JSON_INDENT)
 
 
 def delete_table_data(table_name):
