@@ -19,7 +19,7 @@ uv run database
 
 ```
 uv build
-uv tool install dist/primitive_db-0.2.0-py3-none-any.whl
+uv tool install dist/primitive_db-0.3.0-py3-none-any.whl
 database
 ```
 
@@ -52,3 +52,47 @@ database
 >>>Введите команду: drop_table products
 Ошибка: Таблица "products" не существует.
 ```
+
+## CRUD-операции
+
+Данные каждой таблицы хранятся в отдельном файле `data/<имя_таблицы>.json`.
+Строковые значения всегда пишутся в кавычках, `bool` — как `true`/`false`.
+`ID` генерируется автоматически и в `insert` не передаётся; все поля обязательны.
+
+| Команда | Описание |
+|---|---|
+| `insert into <таблица> values (<значение1>, <значение2>, ...)` | создать запись |
+| `select from <таблица>` | прочитать все записи |
+| `select from <таблица> where <столбец> = <значение>` | прочитать записи по условию |
+| `update <таблица> set <столбец> = <значение> where <столбец> = <значение>` | обновить записи |
+| `delete from <таблица> where <столбец> = <значение>` | удалить записи |
+| `info <таблица>` | информация о таблице |
+
+### Пример
+
+```
+>>>Введите команду: insert into users values ("Sergei", 28, true)
+Запись с ID=1 успешно добавлена в таблицу "users".
+
+>>>Введите команду: select from users where age = 28
++----+--------+-----+-----------+
+| ID |  name  | age | is_active |
++----+--------+-----+-----------+
+| 1  | Sergei |  28 |    True   |
++----+--------+-----+-----------+
+
+>>>Введите команду: update users set age = 29 where name = "Sergei"
+Запись с ID=1 в таблице "users" успешно обновлена.
+
+>>>Введите команду: delete from users where ID = 1
+Запись с ID=1 успешно удалена из таблицы "users".
+
+>>>Введите команду: info users
+Таблица: users
+Столбцы: ID:int, name:str, age:int, is_active:bool
+Количество записей: 0
+```
+
+### Демонстрация CRUD
+
+[![asciicast](https://asciinema.org/a/IFWj6pg9Dy4gpE0t.svg)](https://asciinema.org/a/IFWj6pg9Dy4gpE0t)
