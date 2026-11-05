@@ -19,7 +19,7 @@ uv run database
 
 ```
 uv build
-uv tool install dist/primitive_db-0.3.0-py3-none-any.whl
+uv tool install dist/primitive_db-0.4.0-py3-none-any.whl
 database
 ```
 
@@ -96,3 +96,34 @@ database
 ### Демонстрация CRUD
 
 [![asciicast](https://asciinema.org/a/IFWj6pg9Dy4gpE0t.svg)](https://asciinema.org/a/IFWj6pg9Dy4gpE0t)
+
+## Декораторы и замыкания
+
+Модуль `src/primitive_db/decorators.py`:
+
+| Инструмент | Что делает | Где применён |
+|---|---|---|
+| `handle_db_errors` | перехватывает `KeyError`, `ValueError`, `FileNotFoundError` и прочие исключения, выводит понятное сообщение вместо падения программы | функции `core.py`, обработчики команд в `engine.py` |
+| `confirm_action(action_name)` | запрашивает подтверждение `[y/n]`; любой ответ, кроме `y`, отменяет операцию | `drop_table`, `delete` |
+| `log_time` | выводит время выполнения: `Функция select выполнилась за 0.001 секунд.` | `select`, `insert` |
+| `create_cacher()` | замыкание со словарём-кэшем: одинаковые запросы `select` не читают файл повторно | `select` в `engine.py` |
+
+Кэш учитывает версию файла данных таблицы, поэтому после `insert`, `update`
+или `delete` повторный `select` всегда возвращает актуальные записи.
+Если результат взят из кэша, строка с временем выполнения не выводится.
+
+### Пример подтверждения
+
+```
+>>>Введите команду: drop_table users
+Вы уверены, что хотите выполнить "удаление таблицы"? [y/n]: n
+Операция отменена.
+
+>>>Введите команду: delete from users where ID = 1
+Вы уверены, что хотите выполнить "удаление записей"? [y/n]: y
+Запись с ID=1 успешно удалена из таблицы "users".
+```
+
+### Демонстрация декораторов
+
+[![asciicast](https://asciinema.org/a/9sEMASzgWfUCmSey.svg)](https://asciinema.org/a/9sEMASzgWfUCmSey)

@@ -52,3 +52,11 @@ def delete_table_data(table_name):
         os.remove(table_path(table_name))
     except FileNotFoundError:
         pass
+
+
+def data_version(table_name):
+    """Версия данных таблицы — время изменения файла (0, если файла нет)."""
+    try:
+        return os.stat(table_path(table_name)).st_mtime_ns
+    except FileNotFoundError:
+        return 0

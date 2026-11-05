@@ -10,12 +10,15 @@ from primitive_db.core import (
     drop_table,
     insert,
     list_tables,
+    matches,
     select,
     update,
     validate_clause,
 )
+from primitive_db.decorators import create_cacher, handle_db_errors
 from primitive_db.parser import parse_set, parse_values, parse_where
 from primitive_db.utils import (
+    data_version,
     delete_table_data,
     load_metadata,
     load_table_data,
@@ -24,6 +27,8 @@ from primitive_db.utils import (
 )
 
 META_FILE = "db_meta.json"
+
+select_cache = create_cacher()
 
 INSERT_RE = re.compile(r"^insert\s+into\s+(\w+)\s+values\s*\((.*)\)$", re.IGNORECASE)
 SELECT_RE = re.compile(r"^select\s+from\s+(\w+)(?:\s+where\s+(.+))?$", re.IGNORECASE)
@@ -89,27 +94,37 @@ def print_records(columns, records):
     print(table)
 
 
-def handle_table_command(metadata, command, params, user_input):
+@handle_db_errors
+def handle_table_command(metadata, command, user_input):
     """create_table / drop_table / list_tables."""
+    try:
+        _, *params = shlex.split(user_input)
+    except ValueError:
+        raise ValueError(
+            f"Некорректное значение: {user_input}. Попробуйте снова."
+        ) from None
+
     match command:
         case "create_table":
             if not params:
                 print_incorrect(user_input)
                 return
-            metadata = create_table(metadata, params[0], params[1:])
-            save_metadata(META_FILE, metadata)
+            if create_table(metadata, params[0], params[1:]) is not None:
+                save_metadata(META_FILE, metadata)
         case "drop_table":
             if len(params) != 1:
                 print_incorrect(user_input)
                 return
-            metadata = drop_table(metadata, params[0])
-            save_metadata(META_FILE, metadata)
-            if params[0] not in metadata:
+            if not table_exists(metadata, params[0]):
+                return
+            if drop_table(metadata, params[0]) is not None:
+                save_metadata(META_FILE, metadata)
                 delete_table_data(params[0])
         case "list_tables":
             list_tables(metadata)
 
 
+@handle_db_errors
 def handle_insert(metadata, user_input):
     match_ = INSERT_RE.match(user_input)
     if not match_:
@@ -121,6 +136,7 @@ def handle_insert(metadata, user_input):
         save_table_data(table_name, table_data)
 
 
+@handle_db_errors
 def handle_select(metadata, user_input):
     match_ = SELECT_RE.match(user_input)
     if not match_:
@@ -130,15 +146,24 @@ def handle_select(metadata, user_input):
     if not table_exists(metadata, table_name):
         return
     where_clause = parse_where(raw_where) if raw_where else None
-    if where_clause and not validate_clause(metadata, table_name, where_clause):
+    if where_clause:
+        validate_clause(metadata, table_name, where_clause)
+
+    # Ключ кэша включает версию файла данных: после изменений кэш не устаревает.
+    where_key = tuple(sorted(where_clause.items())) if where_clause else None
+    cache_key = (table_name, data_version(table_name), where_key)
+    records = select_cache(
+        cache_key, lambda: select(load_table_data(table_name), where_clause)
+    )
+    if records is None:
         return
-    records = select(load_table_data(table_name), where_clause)
     if not records:
         print("Записи не найдены.")
         return
     print_records(metadata[table_name]["columns"], records)
 
 
+@handle_db_errors
 def handle_update(metadata, user_input):
     match_ = UPDATE_RE.match(user_input)
     if not match_:
@@ -152,21 +177,23 @@ def handle_update(metadata, user_input):
     if "ID" in set_clause:
         print("Ошибка: столбец ID изменять нельзя.")
         return
-    if not validate_clause(metadata, table_name, set_clause):
-        return
-    if not validate_clause(metadata, table_name, where_clause):
-        return
+    validate_clause(metadata, table_name, set_clause)
+    validate_clause(metadata, table_name, where_clause)
 
     table_data = load_table_data(table_name)
-    ids = [record["ID"] for record in select(table_data, where_clause)]
+    ids = [record["ID"] for record in table_data if matches(record, where_clause)]
     if not ids:
         print("Записи по условию не найдены.")
         return
-    save_table_data(table_name, update(table_data, set_clause, where_clause))
+    table_data = update(table_data, set_clause, where_clause)
+    if table_data is None:
+        return
+    save_table_data(table_name, table_data)
     for record_id in ids:
         print(f'Запись с ID={record_id} в таблице "{table_name}" успешно обновлена.')
 
 
+@handle_db_errors
 def handle_delete(metadata, user_input):
     match_ = DELETE_RE.match(user_input)
     if not match_:
@@ -176,19 +203,22 @@ def handle_delete(metadata, user_input):
     if not table_exists(metadata, table_name):
         return
     where_clause = parse_where(raw_where)
-    if not validate_clause(metadata, table_name, where_clause):
-        return
+    validate_clause(metadata, table_name, where_clause)
 
     table_data = load_table_data(table_name)
-    ids = [record["ID"] for record in select(table_data, where_clause)]
+    ids = [record["ID"] for record in table_data if matches(record, where_clause)]
     if not ids:
         print("Записи по условию не найдены.")
         return
-    save_table_data(table_name, delete(table_data, where_clause))
+    table_data = delete(table_data, where_clause)
+    if table_data is None:
+        return
+    save_table_data(table_name, table_data)
     for record_id in ids:
         print(f'Запись с ID={record_id} успешно удалена из таблицы "{table_name}".')
 
 
+@handle_db_errors
 def handle_info(metadata, user_input):
     match_ = INFO_RE.match(user_input)
     if not match_:
@@ -221,27 +251,23 @@ def run():
             continue
 
         command = user_input.split()[0].lower()
-        try:
-            match command:
-                case "create_table" | "drop_table" | "list_tables":
-                    _, *params = shlex.split(user_input)
-                    handle_table_command(metadata, command, params, user_input)
-                case "insert":
-                    handle_insert(metadata, user_input)
-                case "select":
-                    handle_select(metadata, user_input)
-                case "update":
-                    handle_update(metadata, user_input)
-                case "delete":
-                    handle_delete(metadata, user_input)
-                case "info":
-                    handle_info(metadata, user_input)
-                case "help":
-                    print_help()
-                case "exit":
-                    break
-                case _:
-                    print(f"Функции {command} нет. Попробуйте снова.")
-        except ValueError as error:
-            print_incorrect(error)
+        match command:
+            case "create_table" | "drop_table" | "list_tables":
+                handle_table_command(metadata, command, user_input)
+            case "insert":
+                handle_insert(metadata, user_input)
+            case "select":
+                handle_select(metadata, user_input)
+            case "update":
+                handle_update(metadata, user_input)
+            case "delete":
+                handle_delete(metadata, user_input)
+            case "info":
+                handle_info(metadata, user_input)
+            case "help":
+                print_help()
+            case "exit":
+                break
+            case _:
+                print(f"Функции {command} нет. Попробуйте снова.")
         print()

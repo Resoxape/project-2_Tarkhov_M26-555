@@ -16,7 +16,7 @@ def parse_value(raw):
         return False
     if INTEGER.match(value):
         return int(value)
-    raise ValueError(value)
+    raise ValueError(f"Некорректное значение: {value}. Попробуйте снова.")
 
 
 def split_outside_quotes(text, separator=","):
@@ -38,7 +38,7 @@ def split_outside_quotes(text, separator=","):
         else:
             current.append(char)
     if quote:
-        raise ValueError(text.strip())
+        raise ValueError(f"Некорректное значение: {text.strip()}. Попробуйте снова.")
     parts.append("".join(current))
     return parts
 
@@ -55,7 +55,7 @@ def parse_condition(text):
     column, separator, raw_value = text.partition("=")
     column = column.strip()
     if not separator or not IDENTIFIER.match(column):
-        raise ValueError(text.strip())
+        raise ValueError(f"Некорректное значение: {text.strip()}. Попробуйте снова.")
     return {column: parse_value(raw_value)}
 
 
