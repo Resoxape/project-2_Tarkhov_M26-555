@@ -1,28 +1,69 @@
+import shlex
+
 import prompt
 
-HELP_TEXT = (
-    "<command> exit - выйти из программы\n<command> help - справочная информация"
-)
+from primitive_db.core import create_table, drop_table, list_tables
+from primitive_db.utils import load_metadata, save_metadata
+
+META_FILE = "db_meta.json"
 
 
 def print_help():
-    """Выводит справку по доступным командам."""
-    print(HELP_TEXT)
+    """Prints the help message for the current mode."""
+
+    print("\n***Процесс работы с таблицей***")
+    print("Функции:")
+    print("<command> create_table <имя_таблицы> <столбец1:тип> .. - создать таблицу")
+    print("<command> list_tables - показать список всех таблиц")
+    print("<command> drop_table <имя_таблицы> - удалить таблицу")
+
+    print("\nОбщие команды:")
+    print("<command> exit - выход из программы")
+    print("<command> help - справочная информация\n")
 
 
-def welcome():
-    """Приветствие и основной цикл обработки команд."""
-    print("Первая попытка запустить проект!")
-    print()
-    print("***")
+def run():
+    """Основной цикл программы: ввод, разбор и выполнение команд."""
+    print("\n***База данных***")
     print_help()
+
     while True:
-        command = prompt.string("Введите команду: ").strip()
+        metadata = load_metadata(META_FILE)
+
+        try:
+            user_input = prompt.string(">>>Введите команду: ")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+
+        try:
+            args = shlex.split(user_input)
+        except ValueError:
+            print(f"Некорректное значение: {user_input}. Попробуйте снова.")
+            continue
+        if not args:
+            continue
+
+        command, *params = args
         match command:
+            case "create_table":
+                if not params:
+                    print(f"Некорректное значение: {user_input}. Попробуйте снова.")
+                    continue
+                metadata = create_table(metadata, params[0], params[1:])
+                save_metadata(META_FILE, metadata)
+            case "drop_table":
+                if len(params) != 1:
+                    print(f"Некорректное значение: {user_input}. Попробуйте снова.")
+                    continue
+                metadata = drop_table(metadata, params[0])
+                save_metadata(META_FILE, metadata)
+            case "list_tables":
+                list_tables(metadata)
+            case "help":
+                print_help()
             case "exit":
                 break
-            case "help":
-                print()
-                print_help()
             case _:
-                print(f"Неизвестная команда: {command}. Введите help для справки.")
+                print(f"Функции {command} нет. Попробуйте снова.")
+        print()
