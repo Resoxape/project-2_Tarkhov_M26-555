@@ -1,9 +1,14 @@
-import re
 import shlex
 
 import prompt
 from prettytable import PrettyTable
 
+from primitive_db.constants import (
+    COLUMN_TYPE_SEPARATOR,
+    ID_COLUMN,
+    META_FILE,
+    PROMPT_TEXT,
+)
 from primitive_db.core import (
     create_table,
     delete,
@@ -16,7 +21,14 @@ from primitive_db.core import (
     validate_clause,
 )
 from primitive_db.decorators import create_cacher, handle_db_errors
-from primitive_db.parser import parse_set, parse_values, parse_where
+from primitive_db.parser import (
+    incorrect,
+    parse_delete,
+    parse_info,
+    parse_insert,
+    parse_select,
+    parse_update,
+)
 from primitive_db.utils import (
     data_version,
     delete_table_data,
@@ -26,15 +38,7 @@ from primitive_db.utils import (
     save_table_data,
 )
 
-META_FILE = "db_meta.json"
-
 select_cache = create_cacher()
-
-INSERT_RE = re.compile(r"^insert\s+into\s+(\w+)\s+values\s*\((.*)\)$", re.IGNORECASE)
-SELECT_RE = re.compile(r"^select\s+from\s+(\w+)(?:\s+where\s+(.+))?$", re.IGNORECASE)
-UPDATE_RE = re.compile(r"^update\s+(\w+)\s+set\s+(.+?)\s+where\s+(.+)$", re.IGNORECASE)
-DELETE_RE = re.compile(r"^delete\s+from\s+(\w+)\s+where\s+(.+)$", re.IGNORECASE)
-INFO_RE = re.compile(r"^info\s+(\w+)$", re.IGNORECASE)
 
 
 def print_help():
@@ -72,11 +76,6 @@ def print_help():
     print("<command> help - справочная информация\n")
 
 
-def print_incorrect(value):
-    """Сообщение о некорректном значении."""
-    print(f"Некорректное значение: {value}. Попробуйте снова.")
-
-
 def table_exists(metadata, table_name):
     """Проверяет наличие таблицы и выводит ошибку, если её нет."""
     if table_name not in metadata:
@@ -94,27 +93,28 @@ def print_records(columns, records):
     print(table)
 
 
+def matching_ids(table_data, where_clause):
+    """ID записей, подходящих под условие where."""
+    return [record[ID_COLUMN] for record in table_data if matches(record, where_clause)]
+
+
 @handle_db_errors
 def handle_table_command(metadata, command, user_input):
-    """create_table / drop_table / list_tables."""
+    """Обрабатывает create_table, drop_table и list_tables."""
     try:
         _, *params = shlex.split(user_input)
     except ValueError:
-        raise ValueError(
-            f"Некорректное значение: {user_input}. Попробуйте снова."
-        ) from None
+        raise incorrect(user_input) from None
 
     match command:
         case "create_table":
             if not params:
-                print_incorrect(user_input)
-                return
+                raise incorrect(user_input)
             if create_table(metadata, params[0], params[1:]) is not None:
                 save_metadata(META_FILE, metadata)
         case "drop_table":
             if len(params) != 1:
-                print_incorrect(user_input)
-                return
+                raise incorrect(user_input)
             if not table_exists(metadata, params[0]):
                 return
             if drop_table(metadata, params[0]) is not None:
@@ -126,26 +126,19 @@ def handle_table_command(metadata, command, user_input):
 
 @handle_db_errors
 def handle_insert(metadata, user_input):
-    match_ = INSERT_RE.match(user_input)
-    if not match_:
-        print_incorrect(user_input)
-        return
-    table_name, raw_values = match_.groups()
-    table_data = insert(metadata, table_name, parse_values(raw_values))
+    """Обрабатывает insert into ... values (...)."""
+    table_name, values = parse_insert(user_input)
+    table_data = insert(metadata, table_name, values)
     if table_data is not None:
         save_table_data(table_name, table_data)
 
 
 @handle_db_errors
 def handle_select(metadata, user_input):
-    match_ = SELECT_RE.match(user_input)
-    if not match_:
-        print_incorrect(user_input)
-        return
-    table_name, raw_where = match_.groups()
+    """Обрабатывает select from ... [where ...] с кэшированием результата."""
+    table_name, where_clause = parse_select(user_input)
     if not table_exists(metadata, table_name):
         return
-    where_clause = parse_where(raw_where) if raw_where else None
     if where_clause:
         validate_clause(metadata, table_name, where_clause)
 
@@ -165,23 +158,18 @@ def handle_select(metadata, user_input):
 
 @handle_db_errors
 def handle_update(metadata, user_input):
-    match_ = UPDATE_RE.match(user_input)
-    if not match_:
-        print_incorrect(user_input)
-        return
-    table_name, raw_set, raw_where = match_.groups()
+    """Обрабатывает update ... set ... where ...."""
+    table_name, set_clause, where_clause = parse_update(user_input)
     if not table_exists(metadata, table_name):
         return
-    set_clause = parse_set(raw_set)
-    where_clause = parse_where(raw_where)
-    if "ID" in set_clause:
-        print("Ошибка: столбец ID изменять нельзя.")
+    if ID_COLUMN in set_clause:
+        print(f"Ошибка: столбец {ID_COLUMN} изменять нельзя.")
         return
     validate_clause(metadata, table_name, set_clause)
     validate_clause(metadata, table_name, where_clause)
 
     table_data = load_table_data(table_name)
-    ids = [record["ID"] for record in table_data if matches(record, where_clause)]
+    ids = matching_ids(table_data, where_clause)
     if not ids:
         print("Записи по условию не найдены.")
         return
@@ -195,18 +183,14 @@ def handle_update(metadata, user_input):
 
 @handle_db_errors
 def handle_delete(metadata, user_input):
-    match_ = DELETE_RE.match(user_input)
-    if not match_:
-        print_incorrect(user_input)
-        return
-    table_name, raw_where = match_.groups()
+    """Обрабатывает delete from ... where ... (с подтверждением)."""
+    table_name, where_clause = parse_delete(user_input)
     if not table_exists(metadata, table_name):
         return
-    where_clause = parse_where(raw_where)
     validate_clause(metadata, table_name, where_clause)
 
     table_data = load_table_data(table_name)
-    ids = [record["ID"] for record in table_data if matches(record, where_clause)]
+    ids = matching_ids(table_data, where_clause)
     if not ids:
         print("Записи по условию не найдены.")
         return
@@ -220,15 +204,14 @@ def handle_delete(metadata, user_input):
 
 @handle_db_errors
 def handle_info(metadata, user_input):
-    match_ = INFO_RE.match(user_input)
-    if not match_:
-        print_incorrect(user_input)
-        return
-    table_name = match_.group(1)
+    """Обрабатывает info <таблица>."""
+    table_name = parse_info(user_input)
     if not table_exists(metadata, table_name):
         return
     columns = metadata[table_name]["columns"]
-    columns_text = ", ".join(f"{name}:{kind}" for name, kind in columns.items())
+    columns_text = ", ".join(
+        f"{name}{COLUMN_TYPE_SEPARATOR}{kind}" for name, kind in columns.items()
+    )
     print(f"Таблица: {table_name}")
     print(f"Столбцы: {columns_text}")
     print(f"Количество записей: {len(load_table_data(table_name))}")
@@ -243,7 +226,7 @@ def run():
         metadata = load_metadata(META_FILE)
 
         try:
-            user_input = prompt.string(">>>Введите команду: ").strip()
+            user_input = prompt.string(PROMPT_TEXT).strip()
         except (KeyboardInterrupt, EOFError):
             print()
             break

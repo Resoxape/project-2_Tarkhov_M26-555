@@ -1,7 +1,11 @@
+from primitive_db.constants import (
+    COLUMN_TYPE_SEPARATOR,
+    ID_COLUMN,
+    ID_TYPE,
+    VALID_TYPES,
+)
 from primitive_db.decorators import confirm_action, handle_db_errors, log_time
 from primitive_db.utils import load_table_data
-
-VALID_TYPES = {"int": int, "str": str, "bool": bool}
 
 
 def check_type(value, type_name):
@@ -21,19 +25,21 @@ def create_table(metadata, table_name, columns):
     if table_name in metadata:
         raise ValueError(f'Ошибка: Таблица "{table_name}" уже существует.')
 
-    table_columns = {"ID": "int"}
+    table_columns = {ID_COLUMN: ID_TYPE}
     for column in columns:
-        name, separator, column_type = column.partition(":")
+        name, separator, column_type = column.partition(COLUMN_TYPE_SEPARATOR)
         if not separator or not name or column_type not in VALID_TYPES:
             raise ValueError(f"Некорректное значение: {column}. Попробуйте снова.")
-        if name == "ID" and column_type == "int":
+        if name == ID_COLUMN and column_type == ID_TYPE:
             continue  # ID задан пользователем явно — он уже есть
         if name in table_columns:
             raise ValueError(f"Некорректное значение: {column}. Столбец уже указан.")
         table_columns[name] = column_type
 
     metadata[table_name] = {"columns": table_columns}
-    columns_text = ", ".join(f"{name}:{kind}" for name, kind in table_columns.items())
+    columns_text = ", ".join(
+        f"{name}{COLUMN_TYPE_SEPARATOR}{kind}" for name, kind in table_columns.items()
+    )
     print(f'Таблица "{table_name}" успешно создана со столбцами: {columns_text}')
     return metadata
 
@@ -76,7 +82,7 @@ def insert(metadata, table_name, values):
     schema = [
         (name, kind)
         for name, kind in metadata[table_name]["columns"].items()
-        if name != "ID"
+        if name != ID_COLUMN
     ]
     if len(values) != len(schema):
         raise ValueError(
@@ -90,8 +96,8 @@ def insert(metadata, table_name, values):
             )
 
     table_data = load_table_data(table_name)
-    new_id = max((record["ID"] for record in table_data), default=0) + 1
-    record = {"ID": new_id}
+    new_id = max((record[ID_COLUMN] for record in table_data), default=0) + 1
+    record = {ID_COLUMN: new_id}
     for (name, _), value in zip(schema, values):
         record[name] = value
     table_data.append(record)
