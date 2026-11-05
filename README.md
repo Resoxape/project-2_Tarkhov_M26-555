@@ -6,8 +6,14 @@
 
 ```
 uv sync
-uv run project
+uv run database
 ```
+
+## Демонстрация
+
+Установка пакета, запуск БД, создание, проверка и удаление таблицы:
+
+[![asciicast](https://asciinema.org/a/BxeFn5JAPpJx56Ek.svg)](https://asciinema.org/a/BxeFn5JAPpJx56Ek)
 
 ## Установка
 
